@@ -1,0 +1,58 @@
+name: build
+
+on:
+  push:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Scaffold platform folders (android/ is not committed)
+        run: |
+          flutter create --org com.aayushgupta --project-name keepatit --platforms android --no-pub .
+          rm -f test/widget_test.dart
+
+      - name: Apply Android overlay (manifest: permissions, receivers, label)
+        run: cp -f android_overlay/app/src/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+
+      - name: Dependencies
+        run: flutter pub get
+
+      - name: Codegen (drift)
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Engine test suite
+        run: flutter test --reporter expanded
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Rename APK
+        run: cp build/app/outputs/flutter-apk/app-release.apk keepatit-${{ github.ref_name }}-${{ github.sha }}.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: keepatit-apk
+          path: keepatit-*.apk
+          retention-days: 30
+
+      - name: Publish release (tags only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: keepatit-*.apk
+          generate_release_notes: true

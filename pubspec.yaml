@@ -1,0 +1,42 @@
+name: keepatit
+description: "Keep At It — a no-backend habit notifier. All compute on-device."
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.4.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # Engine
+  timezone: ">=0.9.4 <0.11.0"
+  # Data (PRD §9)
+  drift: ">=2.18.0 <3.0.0"
+  sqlite3_flutter_libs: ">=0.5.20 <0.6.0"
+  path_provider: ">=2.1.0 <3.0.0"
+  path: ">=1.9.0 <2.0.0"
+  # Notifications (wired Day 3)
+  flutter_local_notifications: ">=17.2.0 <20.0.0"
+  flutter_timezone: ">=1.0.8 <5.0.0"
+  intl: ">=0.19.0 <0.22.0"
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ">=4.0.0 <7.0.0"
+  drift_dev: ">=2.18.0 <3.0.0"
+  build_runner: ">=2.4.0 <3.0.0"
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/fonts/
+  fonts:
+    - family: HankenGrotesk
+      fonts:
+        - asset: assets/fonts/HankenGrotesk-Variable.ttf
+    - family: JetBrainsMono
+      fonts:
+        - asset: assets/fonts/JetBrainsMono-Medium.ttf
+          weight: 500
