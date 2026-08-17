@@ -23,8 +23,11 @@ jobs:
           flutter create --org com.aayushgupta --project-name keepatit --platforms android --no-pub .
           rm -f test/widget_test.dart
 
-      - name: Apply Android overlay (manifest: permissions, receivers, label)
+      - name: "Apply Android overlay (manifest: permissions, receivers, label)"
         run: cp -f android_overlay/app/src/main/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
+
+      - name: Enable core library desugaring (flutter_local_notifications requires it)
+        run: python3 android_overlay/patch_gradle.py
 
       - name: Dependencies
         run: flutter pub get
