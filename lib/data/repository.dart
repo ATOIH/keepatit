@@ -152,6 +152,21 @@ Future<void> recordResponseByKey(
         ),
         mode: InsertMode.insertOrIgnore,
       );
+
+  // D-11 (owner correction, 18 Aug): a response delivered from a NOTIFICATION
+  // is ground truth and outranks the system's 'missed' inference — if the
+  // notification was still visible, acting on it counts, even past the
+  // deadline. Only auto-'missed' is overwritten; done / not_done / excused
+  // stay immutable (P-5), and app-sourced responses stay deadline-bound.
+  if (source == 'notification') {
+    await (db.update(db.triggerLogs)
+          ..where((t) => t.id.equals(id) & t.state.equals('missed')))
+        .write(TriggerLogsCompanion(
+      state: Value(state),
+      respondedAt: Value(DateTime.now()),
+      responseSource: const Value('notification'),
+    ));
+  }
 }
 
 Future<List<TriggerLog>> logsOn(AppDb db, String localDate) =>
@@ -161,6 +176,15 @@ Future<List<TriggerLog>> logsOn(AppDb db, String localDate) =>
 Stream<List<TriggerLog>> watchLogsOn(AppDb db, String localDate) =>
     (db.select(db.triggerLogs)..where((t) => t.localDate.equals(localDate)))
         .watch();
+
+/// Logs with localDate >= [sinceDate] ('YYYY-MM-DD' sorts lexicographically).
+Stream<List<TriggerLog>> watchLogsSince(AppDb db, String sinceDate) =>
+    (db.select(db.triggerLogs)
+          ..where((t) => t.localDate.isBiggerOrEqualValue(sinceDate)))
+        .watch();
+
+Future<Habit?> habitRowById(AppDb db, String id) =>
+    (db.select(db.habits)..where((t) => t.id.equals(id))).getSingleOrNull();
 
 // ---------------------------------------------------------------- reconcile
 

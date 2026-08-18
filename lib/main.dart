@@ -1,4 +1,4 @@
-// Keep At It — v0.2.0-alpha: the live notification loop.
+// Keep At It — v0.3.0-alpha: Streaks screen + notification hygiene fix-pack.
 // Init order matters: timezone db -> local location -> app db -> notifier ->
 // UI; a full sync runs after first frame and on every resume (PRD §8.2).
 import 'package:flutter/material.dart';
@@ -12,9 +12,12 @@ import 'notifications/notifier.dart';
 import 'notifications/sync.dart';
 import 'theme/tokens.dart';
 import 'ui/common.dart';
+import 'ui/settings_screen.dart';
+import 'ui/setup_screen.dart';
+import 'ui/streaks_screen.dart';
 import 'ui/today_screen.dart';
 
-const String kAppVersion = '0.2.0 (build 2)';
+const String kAppVersion = '0.3.0 (build 3)';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -120,7 +123,21 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         ),
         title: Text('KEEP AT IT',
             style: KType.headlineMd.copyWith(letterSpacing: -0.4)),
-        actions: const [SizedBox(width: 48)],
+        actions: [
+          if (_tab == 0)
+            IconButton(
+              tooltip: 'New habit',
+              icon: const Icon(Icons.add, color: KColors.lowContrast),
+              onPressed: () async {
+                await Navigator.of(context).push(MaterialPageRoute(
+                    builder: (_) => SetupScreen(db: widget.db),
+                    fullscreenDialog: true));
+                await _resync();
+              },
+            )
+          else
+            const SizedBox(width: 48),
+        ],
         shape: const Border(
             bottom: BorderSide(color: KColors.borderSubtle, width: 1)),
         bottom: _paused
@@ -143,9 +160,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         index: _tab,
         children: [
           TodayScreen(db: widget.db),
-          const _StreaksPlaceholder(),
-          _SettingsLite(
-              db: widget.db, paused: _paused, onTogglePause: _togglePause),
+          StreaksScreen(db: widget.db),
+          SettingsScreen(
+            db: widget.db,
+            paused: _paused,
+            onTogglePause: _togglePause,
+            appVersion: kAppVersion,
+          ),
         ],
       ),
       bottomNavigationBar: NavigationBar(
@@ -160,100 +181,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
       ),
-    );
-  }
-}
-
-class _StreaksPlaceholder extends StatelessWidget {
-  const _StreaksPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(KSpace.marginMobile),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: KSpace.lg),
-          Text('NEUROPLASTICITY IN PROGRESS',
-              style: KType.headlineLgMobile.copyWith(letterSpacing: -0.3)),
-          const SizedBox(height: KSpace.sm),
-          Text('Tracking consistency to rebuild neural pathways.',
-              style: KType.bodySm.copyWith(color: KColors.lowContrast)),
-          const SizedBox(height: KSpace.xl),
-          Center(
-            child: Text('STREAK ANALYTICS ARRIVE IN THE NEXT BUILD',
-                style: KType.labelCaps),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _SettingsLite extends StatelessWidget {
-  final AppDb db;
-  final bool paused;
-  final VoidCallback onTogglePause;
-  const _SettingsLite(
-      {required this.db, required this.paused, required this.onTogglePause});
-
-  @override
-  Widget build(BuildContext context) {
-    return ListView(
-      padding: const EdgeInsets.all(KSpace.marginMobile),
-      children: [
-        const SizedBox(height: KSpace.lg),
-        const SectionLabel('Behavior'),
-        SwitchListTile(
-          contentPadding: EdgeInsets.zero,
-          activeThumbColor: KColors.crimson,
-          title: Text('Pause all triggers', style: KType.bodyLg),
-          subtitle: Text('Nothing fires until you resume.',
-              style: KType.bodySm.copyWith(color: KColors.lowContrast)),
-          value: paused,
-          onChanged: (_) => onTogglePause(),
-        ),
-        const SizedBox(height: KSpace.lg),
-        const SectionLabel('Notifications'),
-        FutureBuilder<bool>(
-          future: notificationsEnabled(),
-          builder: (context, snap) => ListTile(
-            contentPadding: EdgeInsets.zero,
-            title: Text('Permission status', style: KType.bodyLg),
-            trailing: Text(
-              snap.data == null
-                  ? '…'
-                  : (snap.data! ? 'GRANTED' : 'OFF'),
-              style: KType.labelMono.copyWith(
-                  color:
-                      snap.data == false ? KColors.crimson : KColors.onSurface),
-            ),
-            subtitle: snap.data == false
-                ? Text(
-                    'Enable in system Settings → Apps → Keep At It → Notifications.',
-                    style: KType.bodySm.copyWith(color: KColors.lowContrast))
-                : null,
-          ),
-        ),
-        const SizedBox(height: KSpace.lg),
-        const SectionLabel('Data'),
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: KSpace.sm),
-          child: Text(
-            'Your data lives on this device and is included in your '
-            "phone's own backup. Keep At It has no servers.",
-            style: KType.bodySm.copyWith(color: KColors.lowContrast),
-          ),
-        ),
-        const SizedBox(height: KSpace.lg),
-        const SectionLabel('About'),
-        Padding(
-          padding: const EdgeInsets.symmetric(vertical: KSpace.sm),
-          child: Text('Version $kAppVersion · full settings arrive in a later build',
-              style: KType.labelMono.copyWith(color: KColors.lowContrast)),
-        ),
-      ],
     );
   }
 }

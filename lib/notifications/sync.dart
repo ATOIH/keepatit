@@ -20,7 +20,8 @@ Future<void> fullSync(AppDb db, tz.Location loc) async {
     return;
   }
 
-  // 3. Recompute and apply the schedule.
+  // 3. Recompute and apply the schedule. Precision timing (exact alarms) is
+  //    user-opt-in and only honored while the OS grant is actually held.
   final rows = await activeHabitRows(db);
   final specs = rows.map(specFromRow).toList();
   final targets = selectSchedule(
@@ -29,5 +30,9 @@ Future<void> fullSync(AppDb db, tz.Location loc) async {
     now: tz.TZDateTime.now(loc),
     iosBudgetMode: Platform.isIOS,
   );
-  await applySchedule(targets, {for (final s in specs) s.id: s});
+  final exactMode = Platform.isAndroid &&
+      await getAppState(db, 'precision_mode') == '1' &&
+      await canUseExactAlarms();
+  await applySchedule(targets, {for (final s in specs) s.id: s},
+      exactMode: exactMode);
 }

@@ -8,6 +8,7 @@
 // and data-level replacement (auto-miss) happens in reconcile().
 import 'dart:ui' show DartPluginRegistrant;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
@@ -85,9 +86,51 @@ Future<void> handleResponse(NotificationResponse response, AppDb db,
       action == kActionDone ? 'done' : 'not_done',
       'notification',
     );
+    await _dismissPredecessors(db, payload);
   } finally {
     if (closeDb) await db.close();
   }
+}
+
+/// Field-soak fix (18 Aug): answering a newer trigger removes any still-visible
+/// earlier notifications of the same habit. Under inexact scheduling a late
+/// post can outlive its deadline-based timeout, so two could stack; the
+/// user's response is a natural moment to sweep the habit's earlier ids.
+Future<void> _dismissPredecessors(AppDb db, String payload) async {
+  try {
+    if (payload.startsWith('R|')) return; // daily repeating: no predecessors
+    final parsed = parseInstanceKey(payload);
+    if (parsed == null) return;
+    final row = await habitRowById(db, parsed.habitId);
+    if (row == null || row.freqUnit == 'daily') return;
+    final spec = specFromRow(row);
+    final step = spec.intervalMinutes;
+    var cancelled = 0;
+    for (var m = spec.windowStartMin;
+        m < parsed.minuteOfDay && cancelled < 80;
+        m += step) {
+      await notifier.cancel(notificationIdFor(
+          instanceKey(parsed.habitId, parsed.localDate, m)));
+      cancelled++;
+    }
+  } catch (e) {
+    debugPrint('keepatit predecessor sweep error: $e');
+  }
+}
+
+/// Exact-alarm special access (PRD §8.2 Precision timing, Android only).
+Future<bool> canUseExactAlarms() async {
+  final android = notifier.resolvePlatformSpecificImplementation<
+      AndroidFlutterLocalNotificationsPlugin>();
+  if (android == null) return false;
+  return await android.canScheduleExactNotifications() ?? false;
+}
+
+Future<bool> requestExactAlarms() async {
+  final android = notifier.resolvePlatformSpecificImplementation<
+      AndroidFlutterLocalNotificationsPlugin>();
+  if (android == null) return false;
+  return await android.requestExactAlarmsPermission() ?? false;
 }
 
 /// Android 13+ / iOS permission request. Returns true when granted.
@@ -119,8 +162,14 @@ Future<bool> notificationsEnabled() async {
 
 /// Cancels everything pending and schedules [targets]. Idempotent by design —
 /// called from every sync point (launch, resume, response, CRUD, pause toggle).
-Future<void> applySchedule(
-    List<ScheduleTarget> targets, Map<String, HabitSpec> specsById) async {
+///
+/// [exactMode]: true when the user granted Precision timing (exact alarms) —
+/// fires land on the minute and the full deadline window stays visible. In
+/// inexact mode a delivery can run late, so the auto-dismiss is shortened by a
+/// margin (≤10 min or a third of the window) to prevent stacked notifications
+/// (field-soak fix, 18 Aug).
+Future<void> applySchedule(List<ScheduleTarget> targets,
+    Map<String, HabitSpec> specsById, {required bool exactMode}) async {
   await notifier.cancelAll();
 
   for (final t in targets) {
@@ -133,8 +182,10 @@ Future<void> applySchedule(
         t.repeatingDaily ? '${spec.id}|daily-repeat' : key);
 
     // Auto-dismiss at the response deadline (Android only); min 1 minute.
-    final visibleMinutes =
+    final window =
         (t.plan.deadlineMinuteOfDay - t.plan.minuteOfDay).clamp(1, 1440);
+    final margin = exactMode ? 0 : (window ~/ 3).clamp(0, 10);
+    final visibleMinutes = (window - margin).clamp(1, 1440);
 
     final details = NotificationDetails(
       android: AndroidNotificationDetails(
@@ -166,7 +217,9 @@ Future<void> applySchedule(
       notificationBody(spec, t.plan.minuteOfDay),
       t.at,
       details,
-      androidScheduleMode: AndroidScheduleMode.inexactAllowWhileIdle,
+      androidScheduleMode: exactMode
+          ? AndroidScheduleMode.exactAllowWhileIdle
+          : AndroidScheduleMode.inexactAllowWhileIdle,
       // Repeating triggers get the 'R|' marker: their embedded date is only
       // an anchor and responses must remap to the firing day (repository).
       payload: t.repeatingDaily ? 'R|$key' : key,
