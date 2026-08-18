@@ -1,135 +1,115 @@
 # Build status
 
-**Status: GREEN.** CI passes on `main` and the `v0.1.0-alpha1` tag publishes an installable APK.
+**Status: GREEN.** CI passes on `main` and the `v0.2.0-alpha1` tag publishes an
+installable APK. One CI fix was needed this round (a lint-only import removal);
+nothing in `lib/engine/*` or `test/*` was touched.
 
 | | |
 |---|---|
-| First run (`72ebc50`) | ❌ failed — invalid workflow file, no jobs ever started |
-| Fix commit | `d8cc53f` — *CI fix: quote step name with a colon (invalid YAML) + enable gradle desugaring* |
-| Run on `main` (`d8cc53f`) | ✅ [32043843520](https://github.com/ATOIH/keepatit/actions/runs/32043843520) — all 13 steps green |
-| Tag run (`v0.1.0-alpha1`) | ✅ [32044558987](https://github.com/ATOIH/keepatit/actions/runs/32044558987) |
-| **Release** | **https://github.com/ATOIH/keepatit/releases/tag/v0.1.0-alpha1** |
-| Installable APK | [`keepatit-v0.1.0-alpha1-d8cc53f.apk`](https://github.com/ATOIH/keepatit/releases/download/v0.1.0-alpha1/keepatit-v0.1.0-alpha1-d8cc53f03a6cbcde78cabdf7d05b301a6c84a560.apk) — 50,543,132 bytes |
+| Feature commit | `cb51b20` — *v0.2.0-alpha: live notification loop — channel + DONE/NOT DONE actions, background logging, rolling scheduler, Setup & Today on real data* |
+| First run (`cb51b20`) | ❌ [32109543977](https://github.com/ATOIH/keepatit/actions/runs/32109543977) — failed at **Analyze** |
+| Fix commit | `424a710` — *CI fix (attempt 1/4): drop redundant flutter/foundation import in notifier.dart* |
+| Run on `main` (`424a710`) | ✅ [32109730859](https://github.com/ATOIH/keepatit/actions/runs/32109730859) — 8m07s, all steps green |
+| Tag run (`v0.2.0-alpha1`) | ✅ [32110379094](https://github.com/ATOIH/keepatit/actions/runs/32110379094) |
+| **Release** | **https://github.com/ATOIH/keepatit/releases/tag/v0.2.0-alpha1** |
+| Installable APK | [`keepatit-v0.2.0-alpha1-424a710.apk`](https://github.com/ATOIH/keepatit/releases/download/v0.2.0-alpha1/keepatit-v0.2.0-alpha1-424a710d63c675c13fedc17a050efeb776ccffa8.apk) — 59,522,388 bytes |
+| Analyze | `No issues found! (ran in 8.6s)` |
+| Tests | **52/52 passed** (`00:05 +52: All tests passed!`) — up from 29 in v0.1.0 |
 | Attempts used | 1 of 4 |
 | Toolchain | Flutter stable 3.47.0, ubuntu-latest |
 
-Nothing in `lib/engine/*` or `test/*` was touched. Both fixes are in build
-infrastructure only.
-
 ---
 
-## Diagnosis
+## What shipped in this commit
 
-The first run was **not** a job failure. It was a workflow **startup failure**:
-`total_count: 0` jobs, no check runs, no downloadable logs, and zero duration
-(`created_at == updated_at`). The REST API exposes no annotation for this class of
-failure — the error is only rendered on the Actions web page:
+`cb51b20` is the Cowork session's v0.2.0-alpha payload: 11 new/changed library
+files plus 3 new test files, and `pubspec.yaml` version `0.1.0+1` → `0.2.0+2`.
+
+- `lib/notifications/` — `notifier.dart` (channel `habit_triggers`, DONE / NOT DONE
+  action buttons, background response handling), `sync.dart` (rolling scheduler),
+  `content.dart` (notification copy).
+- `lib/ui/` — `setup_screen.dart`, `today_screen.dart`, `priming_sheet.dart`,
+  `common.dart`; `lib/main.dart` rewired onto real data.
+- `lib/data/repository.dart`, `lib/engine/schedule_select.dart`.
+- New suites: `content_test.dart`, `repository_rules_test.dart`,
+  `schedule_select_test.dart`.
+
+No workflow or `android_overlay/` change was required — the manifest overlay
+already carried `POST_NOTIFICATIONS`, `RECEIVE_BOOT_COMPLETED`,
+`SCHEDULE_EXACT_ALARM` and the three `flutter_local_notifications` receivers
+(`ScheduledNotificationReceiver`, `ActionBroadcastReceiver`,
+`ScheduledNotificationBootReceiver`), so the new notification surface built against
+the existing overlay unchanged.
+
+## The one failure, and the fix
+
+Run [32109543977](https://github.com/ATOIH/keepatit/actions/runs/32109543977) got
+through scaffold, overlay, desugaring, `pub get` and drift codegen, then stopped at
+**Analyze** after 1m47s:
 
 ```
-Annotations
-1 error
-Invalid workflow file: .github/workflows/build.yml#L26
-You have an error in your yaml syntax on line 26
+Analyzing keepatit...
+
+   info • The import of 'package:flutter/foundation.dart' is unnecessary because
+   all of the used elements are also provided by the import of
+   'package:flutter/widgets.dart'. Try removing the import directive
+   • lib/notifications/notifier.dart:11:8 • unnecessary_import
+
+1 issue found. (ran in 9.2s)
+##[error]Process completed with exit code 1.
 ```
 
-Line 26 was:
+Note the severity: `info`. The repo's `analysis_options.yaml` makes `flutter
+analyze` exit non-zero on any diagnostic, so an informational lint is a hard build
+failure here — worth remembering when reading future logs.
 
-```yaml
-      - name: Apply Android overlay (manifest: permissions, receivers, label)
-```
-
-The step name is an unquoted YAML plain scalar containing `": "` (in
-`manifest: permissions`). YAML reads that colon-space as a key/value separator, so
-the parser sees a nested mapping where a string was expected and rejects the whole
-file. Because the file never parsed, **none** of the suspected causes could have
-been reached — every step from `flutter create` onward had simply never run.
-
-## Changes made
-
-### 1. `.github/workflows/build.yml` — quoted the offending step name
+Fix (`424a710`), the whole diff:
 
 ```diff
--      - name: Apply Android overlay (manifest: permissions, receivers, label)
-+      - name: "Apply Android overlay (manifest: permissions, receivers, label)"
+--- a/lib/notifications/notifier.dart
++++ b/lib/notifications/notifier.dart
+@@
+-import 'package:flutter/foundation.dart';
+ import 'package:flutter/widgets.dart';
 ```
 
-Why: the minimal fix for the parse error. Quoting makes the whole name a single
-scalar, so the embedded `: ` is just text. Behaviour is otherwise identical.
-
-### 2. `android_overlay/patch_gradle.py` + a workflow step that runs it
-
-```diff
-+      - name: Enable core library desugaring (flutter_local_notifications requires it)
-+        run: python3 android_overlay/patch_gradle.py
-```
-
-Why: `flutter_local_notifications` resolves to **19.5.0** under the pubspec's
-`>=17.2.0 <20.0.0` range. Since 17.x that plugin uses `java.time` APIs and the
-Android build fails outright unless the app module opts into core library
-desugaring. `android/` is generated by `flutter create` in CI and is gitignored, so
-the generated `android/app/build.gradle.kts` has no such opt-in and there is no
-checked-in gradle file to edit. The script patches the generated file in place:
-
-- adds `isCoreLibraryDesugaringEnabled = true` inside the existing `compileOptions` block
-- appends `dependencies { coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4") }`
-
-It handles both `build.gradle.kts` and Groovy `build.gradle`, is idempotent, and is
-deliberately **non-fatal**: if the Flutter template ever stops matching, it prints
-why and exits 0 so the real gradle error surfaces in the build step rather than
-being masked by a patcher crash. CI confirms it fired:
-
-```
-patch_gradle: patched android/app/build.gradle.kts
-        isCoreLibraryDesugaringEnabled = true
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
-```
-
-That is the complete diff. No other file was modified.
-
-## Suspects that did not materialise
-
-Everything below passed unchanged on the first green run, so no fix was needed:
-
-- **(a) `flutter create .` clobbering the project** — clean. Flutter renders its
-  templates with `overwriteExisting: false`, so the existing `pubspec.yaml`,
-  `lib/main.dart`, `analysis_options.yaml` and `README.md` were left alone and only
-  the missing `android/` scaffold was generated. The workflow's existing
-  `rm -f test/widget_test.dart` correctly removes the one new file that would have
-  broken the test step.
-- **(b) pub version resolution** — resolved cleanly across the wide ranges:
-  `drift 2.34.3`, `flutter_local_notifications 19.5.0`, `flutter_timezone 4.1.1`,
-  `timezone 0.10.1`. 101 dependencies, no conflicts.
-- **(c) `flutter analyze`** — `No issues found! (ran in 9.2s)`. The
-  `prefer_single_quotes` rule is satisfied throughout; `"Today's Focus"` in
-  `lib/main.dart` is correctly exempt because it contains an apostrophe.
-- **(d) drift `build_runner` codegen** — succeeded; `db.g.dart` generated for the
-  `Habits` / `TriggerLogs` / `AppState` schema.
-- **(e) tests** — **29/29 passed** across `budget_test.dart`,
-  `instance_generator_test.dart` and `materialize_test.dart`.
-- **(f) APK build / gradle** — passed, given the desugaring fix above.
+`widgets.dart` re-exports `foundation.dart`, so every symbol `notifier.dart` used
+still resolves. Purely mechanical, no behaviour change, and no other file in the
+repo imports `package:flutter/foundation.dart`.
 
 ## Unresolved
 
-None. No step is failing.
+None. All 13 steps are green on both `main` and the tag, and the release asset is
+published and downloadable.
 
-## Note for whoever runs this next: flaky GitHub REST API
+Non-blocking annotation on every run (informational, not a failure):
 
-Throughout this session the GitHub REST API returned intermittent **HTTP 404** for
-this repository — roughly one request in eight succeeded, across
-`/branches`, `/commits`, `/actions/runs` and `/actions/runs/*/jobs`, with both `gh`
-and raw `curl`, on a token carrying `repo` + `workflow`. The 404s are genuine
-responses from `server: github.com` (correct `x-oauth-scopes`, rate limit not
-exhausted), so this looks like backend replication lag on a freshly created repo
-rather than a permissions problem.
+```
+Node.js 20 is deprecated. The following actions target Node.js 20 but are being
+forced to run on Node.js 24: actions/checkout@v4, actions/upload-artifact@v4,
+softprops/action-gh-release@v2.
+```
 
-Practical consequences:
+Nothing to do yet — the runner transparently runs them on Node 24. When those
+actions publish v5 majors, bump them in one commit.
 
-- `gh run list` / `gh run view --log-failed` fail unpredictably. Wrap API calls in a
-  retry loop until a `200` before trusting a result.
-- Do **not** read a 404 as "the run/repo does not exist."
+## Carried-over notes from the v0.1.0 session
 
-Separately, and independent of the flakiness: a workflow startup failure has no jobs
-and no logs, so `gh run view --log-failed` can never explain one. Read the
-annotation from the run's web page, or `GET /repos/{o}/{r}/actions/runs/{id}` and
-treat `total_count: 0` jobs plus `created_at == updated_at` as the signature of a
-malformed workflow file.
+Still true, still worth reading before touching CI:
+
+- **`android/` is not committed.** It is generated in CI by `flutter create` and
+  patched in place by `android_overlay/patch_gradle.py` (core library desugaring —
+  `flutter_local_notifications` 19.x needs `java.time` desugared or gradle fails).
+  The patcher is idempotent and deliberately non-fatal: if the Flutter template
+  stops matching it prints why and exits 0, so the real gradle error surfaces
+  instead of a patcher crash. It fired again this run.
+- **Step names containing `": "` must be quoted.** An unquoted colon-space in a
+  YAML plain scalar broke the whole workflow file in the v0.1.0 session. A
+  malformed workflow is a *startup* failure: no jobs, no logs, `total_count: 0`,
+  `created_at == updated_at`, and `gh run view --log-failed` can never explain it —
+  read the annotation on the run's web page instead.
+- **Flaky GitHub REST 404s.** The v0.1.0 session saw intermittent HTTP 404 on this
+  repo across `/branches`, `/commits` and `/actions/runs`, on a correctly scoped
+  token. Not observed at all this session (likely fresh-repo replication lag that
+  has since settled), but if it returns: retry until a 200, and never read a 404 as
+  "the run does not exist."
